@@ -147,3 +147,16 @@ class Pipeline:
             logger.error(f"Failed to save JSON for {doc.tokenized.source_path}: {e}")
 
         return out_path
+
+    def _process_one_direct(self, doc: AnalyzedDocument) -> AnalyzedDocument:
+        """Run analyzers on an already-tokenized document (for CLI analyze command)."""
+        try:
+            if self._semantic:
+                self._semantic.analyze(doc)
+            if self._morphology:
+                self._morphology.analyze(doc)
+            if self._genre:
+                self._genre.analyze(doc)
+        except Exception as e:
+            logger.error(f"Analysis failed: {e}")
+        return doc
