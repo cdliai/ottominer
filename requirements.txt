@@ -1,14 +1,22 @@
 # Core dependencies
 rich>=10.0.0
-pytest>=7.0.0
-pytest-timeout>=2.1.0
 pyyaml>=6.0.0
 psutil>=5.9.0
 pymupdf4llm>=0.0.17
-reportlab>=4.0.0
+chardet>=5.0.0
+durak-nlp>=0.1.0
+scikit-learn>=1.3.0
+plotly>=5.0.0
+matplotlib>=3.7.0
 
-# Development dependencies
-black>=23.0.0
-isort>=5.12.0
-flake8>=6.0.0
-pytest-cov>=4.1.0
+# Optional extras are declared in setup.py
+# Install with: pip install ottominer[ocr], ottominer[ollama], ottominer[dev]
+
+# Development dependencies (pip install ottominer[dev])
+# black>=23.0.0
+# isort>=5.12.0
+# flake8>=6.0.0
+# pytest>=7.0.0
+# pytest-timeout>=2.1.0
+# pytest-cov>=4.1.0
+# reportlab>=4.0.0
