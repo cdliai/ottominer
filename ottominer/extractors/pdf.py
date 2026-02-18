@@ -1,44 +1,35 @@
 from pathlib import Path
-from typing import Dict, Union, List, Optional, Tuple
+from typing import Dict, Union, List, Optional, Any
 import pymupdf4llm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import os
-import fitz  # PyMuPDF
+import fitz
 
 from ..utils.logger import setup_logger
 from ..utils.progress import ProgressTracker
 from ..utils.decorators import handle_exceptions
+from ..utils.cache import ExtractionCache
 from .base import BaseExtractor
 
 logger = setup_logger(__name__)
 
-# Tier thresholds
 MIN_CHARS_PER_PAGE = 100
 MAX_REPLACEMENT_RATIO = 0.05
 
 
 def _chardet_available() -> bool:
     try:
-        import chardet  # noqa: F401
+        import chardet
 
         return True
     except ImportError:
         return False
 
 
-def _surya_available() -> bool:
+def _preprocessing_available() -> bool:
     try:
-        from surya.ocr import run_ocr  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
-def _ollama_available() -> bool:
-    try:
-        import ollama  # noqa: F401
+        from ..preprocessing import preprocess_pdf
 
         return True
     except ImportError:
@@ -51,14 +42,20 @@ class PDFExtractor(BaseExtractor):
     Tiers:
       1. pymupdf4llm (always on) - text-native PDFs
       2. chardet encoding repair - fix corrupted text
-      3. Surya OCR (optional) - image-based PDFs
-      4. Ollama vision (optional) - GPU-accelerated OCR
+      3. Preprocessing + OCR (configurable backends)
+
+    Supported OCR backends:
+      - tesseract: Fast, CPU-only (pip install pytesseract pdf2image)
+      - easyocr: Multilingual (pip install easyocr)
+      - kraken: Best for Arabic/historical (pip install kraken)
+      - ollama: Local GPU models (pip install ollama)
+      - mistral: Cloud API (pip install mistralai)
     """
 
-    def __init__(self, config: Dict = None):
-        super().__init__(config)
-        self.config = config.get("pdf_extraction", {}) if config else {}
-        self.pdf_config = {
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        super().__init__(config or {})
+        self.config: Dict[str, Any] = (config or {}).get("pdf_extraction", {})
+        self.pdf_config: Dict[str, Any] = {
             "dpi": self.config.get("dpi", 300),
             "margins": self.config.get("margins", (50, 50, 0, 0)),
             "table_strategy": self.config.get("table_strategy", "lines_strict"),
@@ -68,6 +65,36 @@ class PDFExtractor(BaseExtractor):
         self.ocr_backend = self.config.get("ocr_backend", "auto")
         self.ocr_model = self.config.get("ocr_model", "deepseek-ocr")
         self.enable_ocr = self.config.get("enable_ocr", False)
+        self.enable_preprocessing = self.config.get("enable_preprocessing", True)
+        self._cache: Optional[ExtractionCache] = None
+        self._ocr_backend_instance = None
+
+    def _get_cache(self) -> Optional[ExtractionCache]:
+        if self._cache is None and self.config.get("cache_enabled", True):
+            self._cache = ExtractionCache(
+                cache_dir=self.config.get("cache_dir"),
+                ttl_hours=self.config.get("cache_ttl_hours", 168),
+            )
+        return self._cache
+
+    def _get_ocr_backend(self):
+        if self._ocr_backend_instance is None and self.enable_ocr:
+            try:
+                from .ocr import get_backend
+
+                backend_name = (
+                    self.ocr_backend if self.ocr_backend != "auto" else "tesseract"
+                )
+                self._ocr_backend_instance = get_backend(
+                    backend_name,
+                    {
+                        "model": self.ocr_model,
+                        "dpi": self.pdf_config.get("dpi", 300),
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Could not load OCR backend: {e}")
+        return self._ocr_backend_instance
 
     def batch_extract(self, file_paths: List[Union[str, Path]]) -> Dict[str, str]:
         """Implement required abstract method."""
@@ -204,89 +231,22 @@ class PDFExtractor(BaseExtractor):
             return None
 
     def _extract_with_ocr(self, file_path: Path) -> Optional[str]:
-        """Extract using OCR backend."""
-        if self.ocr_backend == "ollama":
-            return self._ocr_ollama(file_path)
-        elif self.ocr_backend == "surya":
-            return self._ocr_surya(file_path)
-        else:
-            if _ollama_available():
-                result = self._ocr_ollama(file_path)
-                if result:
-                    return result
-            if _surya_available():
-                result = self._ocr_surya(file_path)
-                if result:
-                    return result
-            if not self.enable_ocr:
-                logger.info("OCR not enabled and no OCR backend available")
-            return None
+        """Extract using OCR backend (modular system)."""
+        backend = self._get_ocr_backend()
 
-    def _ocr_surya(self, file_path: Path) -> Optional[str]:
-        """Extract using Surya OCR."""
-        if not _surya_available():
-            logger.warning(
-                "Surya OCR not available. Install with: pip install surya-ocr"
-            )
+        if backend is None:
+            logger.info("OCR not enabled or no backend available")
             return None
 
         try:
-            from surya.ocr import run_ocr
-            from surya.model.detection.model import load_model as load_det_model
-            from surya.model.recognition.model import load_model as load_rec_model
-
-            logger.info(f"Running Surya OCR on {file_path}")
-
-            det_model = load_det_model()
-            rec_model = load_rec_model()
-
-            results = run_ocr([str(file_path)], [None], det_model, rec_model)
-
-            if results:
-                text = "\n".join(
-                    line.text for page in results for line in page.text_lines
-                )
-                return text
-
-            return None
+            if backend.is_available():
+                logger.info(f"Using OCR backend: {backend.name}")
+                return backend.extract(file_path)
+            else:
+                logger.warning(f"OCR backend {backend.name} is not available")
+                return None
         except Exception as e:
-            logger.error(f"Surya OCR failed: {e}")
-            return None
-
-    def _ocr_ollama(self, file_path: Path) -> Optional[str]:
-        """Extract using Ollama vision model."""
-        if not _ollama_available():
-            logger.warning("Ollama not available. Install with: pip install ollama")
-            return None
-
-        try:
-            import ollama
-            import base64
-
-            logger.info(f"Running Ollama OCR ({self.ocr_model}) on {file_path}")
-
-            with open(file_path, "rb") as f:
-                pdf_bytes = f.read()
-
-            pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-
-            response = ollama.chat(
-                model=self.ocr_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": "Extract all text from this PDF document. Output only the extracted text, no explanations.",
-                        "images": [pdf_b64],
-                    }
-                ],
-            )
-
-            if response and "message" in response:
-                return response["message"].get("content", "")
-
-            return None
-        except Exception as e:
-            logger.error(f"Ollama OCR failed: {e}")
+            logger.error(f"OCR extraction failed: {e}")
             return None
 
     def _is_valid_pdf(self, file_path: Path) -> bool:

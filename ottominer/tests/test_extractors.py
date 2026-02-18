@@ -4,12 +4,22 @@ from ottominer.extractors.pdf import (
     PDFExtractor,
     ParallelPDFExtractor,
     _chardet_available,
-    _surya_available,
-    _ollama_available,
+    _preprocessing_available,
 )
 from reportlab.pdfgen import canvas
 import time
 from ottominer.utils.progress import ProgressTracker
+
+
+def _check_ocr_backend(name):
+    """Check if an OCR backend is available."""
+    try:
+        from ottominer.extractors.ocr import get_backend
+
+        backend = get_backend(name)
+        return backend.is_available()
+    except Exception:
+        return False
 
 
 def create_test_pdf(tmp_path, content="Test Document", filename="test.pdf"):
@@ -180,12 +190,20 @@ class TestTieredExtraction:
         result = _chardet_available()
         assert isinstance(result, bool)
 
-    def test_surya_availability_check(self):
-        result = _surya_available()
+    def test_preprocessing_availability_check(self):
+        result = _preprocessing_available()
+        assert isinstance(result, bool)
+
+    def test_tesseract_availability_check(self):
+        result = _check_ocr_backend("tesseract")
+        assert isinstance(result, bool)
+
+    def test_kraken_availability_check(self):
+        result = _check_ocr_backend("kraken")
         assert isinstance(result, bool)
 
     def test_ollama_availability_check(self):
-        result = _ollama_available()
+        result = _check_ocr_backend("ollama")
         assert isinstance(result, bool)
 
     def test_valid_text_pdf_uses_tier1(self, tmp_path, pdf_config):
