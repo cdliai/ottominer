@@ -2,7 +2,7 @@ import re
 import json
 import logging
 from pathlib import Path
-from typing import List, Tuple, Set
+from typing import List, Optional, Tuple, Set
 
 from .base import TokenizedDocument
 
@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 # token objects with .text/.offset attributes, and does not expose Lemmatizer.
 try:
     from durak import clean_text as durak_clean, tokenize as durak_tokenize
-    from durak import attach_detached_suffixes
     _DURAK_AVAILABLE = True
     logger.info("durak-nlp loaded successfully")
 except ImportError:
@@ -113,7 +112,7 @@ class OttomanTokenizer:
     Ottoman stopword filtering is always applied regardless of backend.
     """
 
-    def __init__(self, extra_stopwords: Set[str] = None):
+    def __init__(self, extra_stopwords: Optional[Set[str]] = None):
         self.stopwords = set(_OTTOMAN_STOPWORDS)
         if extra_stopwords:
             self.stopwords.update(extra_stopwords)
