@@ -3,10 +3,10 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Union
 
-from .extractors.pdf import PDFExtractor
+from .extractors.universal import UniversalVDI
 from .analyzers.tokenizer import OttomanTokenizer
 from .analyzers.semantic import SemanticAnalyzer
-from .analyzers.morphology import MorphologyAnalyzer
+from .analyzers.durak_wrapper import DurakAnalyzer
 from .analyzers.genre import GenreAnalyzer
 from .analyzers.similarity import SimilarityAnalyzer
 from .analyzers.base import AnalyzedDocument, TokenizedDocument
@@ -21,7 +21,7 @@ class Pipeline:
     OttoMiner end-to-end pipeline.
 
     Stages:
-      1. Extract  — PDF to raw text via PDFExtractor (tiered, see extractors/pdf.py)
+      1. Extract  — PDF to raw text via UniversalVDI (Dual-Stream OCR)
       2. Tokenize — Raw text to TokenizedDocument via OttomanTokenizer
       3. Analyze  — TokenizedDocument to AnalyzedDocument via selected analyzers
       4. Output   — Serialize results to JSON (and CSV summary if requested)
@@ -45,12 +45,12 @@ class Pipeline:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.analyzers = _ALL_ANALYZERS if analyzers is None else analyzers
-        self._extractor = PDFExtractor(config=extractor_config or {})
+        self._extractor = UniversalVDI(config=extractor_config or {})
         self._tokenizer = OttomanTokenizer()
 
         self._semantic = SemanticAnalyzer() if "semantic" in self.analyzers else None
         self._morphology = (
-            MorphologyAnalyzer() if "morphology" in self.analyzers else None
+            DurakAnalyzer() if "morphology" in self.analyzers else None
         )
         self._genre = GenreAnalyzer() if "genre" in self.analyzers else None
         self._similarity = (

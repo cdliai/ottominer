@@ -169,18 +169,19 @@ def _add_run_subparser(subparsers):
 
 def cmd_extract(args) -> int:
     """Execute the extract command."""
-    from ..extractors.pdf import PDFExtractor, ParallelPDFExtractor
+    from ..extractors.universal import UniversalVDI
 
     input_path = args.input
     output_dir = args.output
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config = {
-        "pdf_extraction": {
-            "ocr_backend": args.ocr_backend,
-            "ocr_model": args.ocr_model,
-            "enable_ocr": args.ocr,
-            "workers": args.workers,
+        "vdi": {
+            "stream_a": args.ocr_backend if args.ocr_backend != "auto" else "kraken",
+            "stream_b": "mistral",
+            "stream_a_config": {
+                "model": args.ocr_model,
+            },
         }
     }
 
@@ -189,16 +190,21 @@ def cmd_extract(args) -> int:
         print(f"No PDF files found in {input_path}")
         return 1
 
-    print(f"Extracting text from {len(pdf_files)} PDF(s)...")
+    print(f"Extracting text from {len(pdf_files)} PDF(s) using UniversalVDI...")
 
-    if args.workers > 1 and len(pdf_files) > 1:
-        extractor = ParallelPDFExtractor(config)
-        results = extractor.batch_extract(pdf_files)
-    else:
-        extractor = PDFExtractor(config)
-        results = {str(f): extractor.extract(f) for f in pdf_files}
+    extractor = UniversalVDI(config)
+    results = extractor.batch_extract(pdf_files)
 
     successful = sum(1 for v in results.values() if v)
+    
+    # Save the output files
+    for file_path, text in results.items():
+        if text:
+            # We assume extractors know how to save but we can just save it directly here
+            # using BaseExtractor's save_output method which may be inherited
+            out_file = output_dir / f"{Path(file_path).stem}.txt"
+            out_file.write_text(text, encoding="utf-8")
+
     print(f"Extracted {successful}/{len(pdf_files)} documents")
 
     return 0
