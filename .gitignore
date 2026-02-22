@@ -43,4 +43,6 @@ htmlcov/
 logs/
 output/
 cache/
-.ottominer/ 
+.ottominer/
+
+/ottominer/logs/
